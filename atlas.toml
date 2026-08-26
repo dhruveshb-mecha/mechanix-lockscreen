@@ -3,5 +3,5 @@ name = "lockscreen"
 
 [[atlas.font]]
 name = "geist_mono"
-path = "../../assets/GeistMono-Regular.ttf"
+path = "assets/GeistMono-Regular.ttf"
 sizes = [128, 46, 24, 36, 12]

@@ -1,0 +1,4 @@
+# Sample PIN file entry for development. PIN is "1234".
+# Format: username:crypt(3)-hash (sha512-crypt via `openssl passwd -6`).
+# On device, use: sudo ./make-pin.sh <PIN> [username]
+mecha:$6$7XuRNxz58xwQiSQS$5KWh.MYuMk.x2ggwQZNDSNW5VGe9NwwBGgokTOLrM8zLbIJYvqYEwQt9j4zHuOgHNfUZ.69NEcOTiLHlHzvo0.

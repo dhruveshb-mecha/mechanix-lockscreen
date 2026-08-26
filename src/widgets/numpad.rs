@@ -2,7 +2,7 @@ use super::button::Button;
 use taffy::prelude::*;
 use taffy::{Size, Style};
 use ui::widgets::Div;
-use ui::{Damage, Point, Render, RenderCommand, Widget, WidgetList};
+use ui::{Damage, Point, Render, RenderCommand, Widget};
 
 /// Layout style for the keypad grid layout.
 fn keypad_grid_style() -> Style {
@@ -119,40 +119,6 @@ impl Numpad {
             pending_damage: Damage::None,
             is_opaque: true,
             children: grid,
-        }
-    }
-
-    /// Returns the button ID (1-9, 0, 10 for backspace) at point `p`.
-    pub fn hit(&self, p: Point) -> Option<u8> {
-        let row1 = &self.children.children.0.0;
-        let row2 = &self.children.children.0.1;
-        let row3 = &self.children.children.1.0;
-        let row4 = &self.children.children.1.1;
-
-        if row1.children.0.bounds().contains_point(p) {
-            Some(1)
-        } else if row1.children.1.bounds().contains_point(p) {
-            Some(2)
-        } else if row1.children.2.bounds().contains_point(p) {
-            Some(3)
-        } else if row2.children.0.bounds().contains_point(p) {
-            Some(4)
-        } else if row2.children.1.bounds().contains_point(p) {
-            Some(5)
-        } else if row2.children.2.bounds().contains_point(p) {
-            Some(6)
-        } else if row3.children.0.bounds().contains_point(p) {
-            Some(7)
-        } else if row3.children.1.bounds().contains_point(p) {
-            Some(8)
-        } else if row3.children.2.bounds().contains_point(p) {
-            Some(9)
-        } else if row4.children.1.bounds().contains_point(p) {
-            Some(0)
-        } else if row4.children.2.bounds().contains_point(p) {
-            Some(10)
-        } else {
-            None
         }
     }
 

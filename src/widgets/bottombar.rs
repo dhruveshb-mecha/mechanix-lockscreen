@@ -1,11 +1,13 @@
-use crate::ScreenState;
-use crate::atlas;
-use renderer::commands::Color;
 use taffy::prelude::*;
 use taffy::{Size, Style};
 use ui::widgets::{Div, Text};
 use ui::{Damage, OnChange, Point, Render, RenderCommand};
+use window_manager::Color;
 
+use super::ScreenState;
+use crate::atlas;
+
+/// Bottom bar (also the cancel hitbox).
 fn bottom_container_style() -> Style {
     Style {
         display: Display::Flex,
@@ -15,11 +17,15 @@ fn bottom_container_style() -> Style {
             width: percent(1.0_f32),
             height: auto(),
         },
+        min_size: Size {
+            width: auto(),
+            height: length(56.0_f32),
+        },
         ..Style::default()
     }
 }
 
-/// Widget representing bottom bar controls (e.g., "HOLD TO EXPAND", "CANCEL").
+/// Widget representing bottom bar controls (e.g., "TAP TO EXPAND", "CANCEL").
 #[ui::widget]
 pub struct BottomBar {
     #[widget(child)]
@@ -64,7 +70,7 @@ impl OnChange<ScreenState> for BottomBar {
 
     fn change(&mut self, state: ScreenState) {
         match state {
-            ScreenState::HoldToExpand => self.set_text("HOLD TO EXPAND"),
+            ScreenState::TapToExpand => self.set_text("TAP TO EXPAND"),
             ScreenState::PinLock => self.set_text("CANCEL"),
         }
     }

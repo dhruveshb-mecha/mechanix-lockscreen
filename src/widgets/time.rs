@@ -1,9 +1,9 @@
-use renderer::commands::Color;
 use taffy::prelude::*;
 use taffy::{Size, Style};
 use ui::widgets::{Div, Text};
 use ui::{Damage, OnChange, Point, Render, RenderCommand};
 use utils::Rect as UtilsRect;
+use window_manager::Color;
 
 use crate::atlas;
 use crate::widgets::datetime::{DateTime, DateTimeUpdate};
@@ -48,12 +48,12 @@ impl TimeWidget {
         let mut time_widget = Text::new(Style::default());
         time_widget.font = Some(&atlas::LOCKSCREEN_FONT_GEIST_MONO_46);
         time_widget.color = Color::from_rgb8(242, 242, 240);
-        time_widget.text = time_str.into();
+        time_widget.text = time_str;
 
         let mut date_widget = Text::new(Style::default());
         date_widget.font = Some(&atlas::LOCKSCREEN_FONT_GEIST_MONO_12);
         date_widget.color = Color::from_rgb8(255, 106, 31);
-        date_widget.text = date_str.into();
+        date_widget.text = date_str;
 
         let header = Div::new(header_style(), (time_widget, date_widget));
 

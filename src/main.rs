@@ -1,264 +1,181 @@
+#![recursion_limit = "2048"]
 pub mod atlas {
     include!(concat!(env!("OUT_DIR"), "/lockscreen_gen.rs"));
 }
 
+pub mod auth;
+pub mod events;
+mod session;
 pub mod widgets;
 
-use app::prelude::*;
-use io_ring::Ring;
-use renderer::commands::Color;
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::time::Instant;
 
-use taffy::prelude::*;
-use taffy::{Size, Style};
-use timer::{Absolute, Clock, Timer, TimerEvent};
-use ui::{Damage, OnChange, Point, Render, RenderCommand, Widget};
-use utils::Rect as UtilsRect;
-use wayland::{WlPointerButtonState, WlPointerEvent, WlTouchEvent};
+use app::prelude::*;
+use app::{Poll, PrePoll, Start};
+use io_ring::{IoEvent, Ring};
+use timer::{Absolute, Clock, Relative, Timer, TimerEvent, TimerId};
+use tracing_subscriber::{EnvFilter, filter::LevelFilter};
+use ui::Point;
+use wayland::{
+    ExtSessionLockSurfaceV1Event, ExtSessionLockV1Event, WlPointerButtonState, WlPointerEvent,
+    WlRegistryEvent, WlTouchEvent,
+};
 use window_manager::prelude::*;
 
-use widgets::{
-    BottomBar, DateTime, DateTimeChanged, DateTimeTick, DateTimeUpdate, PinClick, PinRelease,
-    PinWidget, TimeWidget,
-};
+use auth::AuthFinished;
+use auth::pin::{self, Gate, Policy, ResultChannel, Trigger};
+use events::{PinClick, PinOffer, PinOutcome, PinRelease};
+use session::Session;
+use widgets::{DateTime, DateTimeChanged, DateTimeTick, DateTimeUpdate, Lockscreen};
 
-const BG: Color = Color::from_rgb8(0, 0, 0);
-const BTN_LEFT: u32 = 0x110;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScreenState {
-    HoldToExpand,
-    PinLock,
+#[derive(Debug, Clone, Copy)]
+enum AuthResult {
+    Unlocked,
+    Displayed(PinOutcome),
 }
 
-fn root_style() -> Style {
-    Style {
-        display: Display::Flex,
-        flex_direction: FlexDirection::Column,
-        justify_content: Some(JustifyContent::SpaceBetween),
-        align_items: Some(AlignItems::Start),
-        size: Size {
-            width: percent(1.0_f32),
-            height: percent(1.0_f32),
-        },
-        padding: Rect {
-            left: length(48.0_f32),
-            right: length(48.0_f32),
-            top: length(48.0_f32),
-            bottom: length(48.0_f32),
-        },
-        gap: Size {
-            width: zero(),
-            height: zero(),
-        },
-        ..Style::default()
-    }
+/// Auth orchestration: verdict channel, attempt gate, and the widget→app
+/// PIN hand-off slot.
+struct PinAuth {
+    policy: Policy,
+    gate: Gate,
+    available: bool,
+    rx: ResultChannel,
+    trigger: Trigger,
+    pending: PinOffer,
+    // Wake-up hint only; the Gate decides when the lockout is over.
+    lockout_timer: Option<TimerId>,
 }
 
-#[ui::widget]
-struct Lockscreen {
-    screen: ScreenState,
-    #[widget(child)]
-    children: (TimeWidget, PinWidget, BottomBar),
-}
-
-impl Render for Lockscreen {
-    fn render(&self, _layout: &taffy::Layout, _abs_pos: Point) -> Vec<RenderCommand> {
-        Vec::new()
-    }
-}
-
-impl Lockscreen {
-    fn new() -> Self {
+impl PinAuth {
+    fn new(
+        policy: Policy,
+        username: String,
+        available: bool,
+        read_fd: std::os::fd::OwnedFd,
+        write_fd: std::os::fd::OwnedFd,
+        offer: PinOffer,
+        proxy: io_ring::RingProxy,
+    ) -> Self {
         Self {
-            node_id: taffy::NodeId::new(u64::MAX),
-            style: root_style(),
-            bounds: UtilsRect::ZERO,
-            pending_damage: Damage::None,
-            is_opaque: true,
-            screen: ScreenState::HoldToExpand,
-            children: (
-                TimeWidget::new(),
-                PinWidget::new(),
-                BottomBar::new("HOLD TO EXPAND"),
-            ),
+            gate: Gate::new(policy.max_attempts, policy.lockout),
+            policy,
+            available,
+            rx: ResultChannel::new(read_fd, proxy),
+            trigger: Trigger::new(username, write_fd),
+            pending: offer,
+            lockout_timer: None,
         }
     }
-}
 
-/// Updates date and time.
-impl OnChange<DateTimeUpdate> for Lockscreen {
-    fn damage(&self, _new: &DateTimeUpdate) -> Damage {
-        Damage::None
+    fn submit_pending(&mut self, now: Instant) -> Option<PinOutcome> {
+        let pin = self.pending.borrow_mut().take()?;
+        if !self.available || self.gate.lockout_remaining(now).is_some() {
+            return None;
+        }
+        self.trigger.submit(&pin).then_some(PinOutcome::Checking)
     }
 
-    fn change(&mut self, new: DateTimeUpdate) {
-        self.children.0.set(new);
-    }
-}
-
-/// Handles click interactions and state transitions for the Lockscreen.
-impl OnChange<PinClick> for Lockscreen {
-    fn damage(&self, _new: &PinClick) -> Damage {
-        Damage::None
+    fn take_verdict(&mut self, ev: &IoEvent, ring: &Ring) -> Option<bool> {
+        let IoEvent::Completed { token, result } = ev;
+        self.rx
+            .take(&ring.proxy(), token, *result)
+            .map(|byte| byte == 1)
     }
 
-    fn change(&mut self, new: PinClick) {
-        match self.screen {
-            ScreenState::HoldToExpand => {
-                self.screen = ScreenState::PinLock;
+    fn resolve(&mut self, ok: bool, now: Instant, timer: &mut Timer) -> AuthResult {
+        self.trigger.finish();
+        if ok {
+            tracing::info!("authentication succeeded; unlocking");
+            self.gate.succeeded();
+            return AuthResult::Unlocked;
+        }
 
-                let mut pin_style = self.children.1.style().clone();
-                pin_style.display = Display::Flex;
-                self.children.1.set(pin_style);
+        tracing::warn!("authentication failed");
+        if let Some(secs) = self.gate.lockout_remaining(now) {
+            return AuthResult::Displayed(PinOutcome::LockedOut { secs });
+        }
+        if self.gate.failed(now).is_some() {
+            let lockout = self.policy.lockout;
+            tracing::warn!("lockout engaged for {lockout:?}");
+            self.lockout_timer = Some(timer.start_timer(Relative {
+                duration: lockout,
+                repeat: false,
+            }));
+            return AuthResult::Displayed(PinOutcome::LockedOut {
+                secs: lockout.as_secs() as u32,
+            });
+        }
+        AuthResult::Displayed(PinOutcome::Incorrect)
+    }
 
-                self.children.2.set(self.screen);
-            }
-            ScreenState::PinLock => {
-                if self.children.2.own_bounds().contains_point(new.0) {
-                    self.children.1.reset();
-                    self.screen = ScreenState::HoldToExpand;
-
-                    let mut pin_style = self.children.1.style().clone();
-                    pin_style.display = Display::None;
-                    self.children.1.set(pin_style);
-
-                    self.children.2.set(self.screen);
-                    return;
-                }
-
-                self.children.1.set(new);
-            }
+    /// Whether this completion was our outstanding lockout wake-up.
+    fn lockout_wake(&mut self, ev: &TimerEvent) -> bool {
+        let TimerEvent::Finished { id } = ev else {
+            return false;
+        };
+        if self.lockout_timer == Some(*id) {
+            self.lockout_timer = None;
+            true
+        } else {
+            false
         }
     }
-}
 
-/// Handles PIN keypad release.
-impl OnChange<PinRelease> for Lockscreen {
-    fn damage(&self, _new: &PinRelease) -> Damage {
-        Damage::None
-    }
-
-    fn change(&mut self, new: PinRelease) {
-        self.children.1.set(new);
+    fn lockout_expired(&mut self) -> bool {
+        self.gate.tick(Instant::now())
     }
 }
 
 #[derive(State)]
-struct LockscreenState {
+struct LockscreenApp {
     ring: Ring,
     wm: WindowManager,
     timer: Timer,
+    datetime: DateTime,
     #[lens(skip)]
-    handle: WindowHandle<Lockscreen>,
+    auth: PinAuth,
+    #[lens(skip)]
+    session: Session,
+    #[lens(skip)]
+    status: PinOutcome,
+    #[lens(skip)]
+    open: bool,
     #[lens(skip)]
     pointer: Point,
-    datetime: DateTime,
 }
 
-fn main() {
-    let ring = Ring::default();
-    let mut wm = WindowManager::new(ring.proxy());
-    wm.upload_atlas(&atlas::LOCKSCREEN);
+fn on_registry(s: &mut LockscreenApp, ev: &WlRegistryEvent) {
+    s.session.on_registry(ev, &mut s.wm, s.status);
+}
 
-    let handle = wm.spawn_window(
-        WindowSettings {
-            width: 540,
-            height: 620,
-            clear_color: BG,
-            kind: WindowKind::Xdg {
-                title: "lockscreen".into(),
-            },
-            touch_config: None,
-            gesture_config: None,
-        },
-        Lockscreen::new(),
-    );
+fn on_configure(s: &mut LockscreenApp, ev: &ExtSessionLockSurfaceV1Event) {
+    s.session.route_configure(ev, &mut s.wm);
+}
 
-    let timer = Timer::new(ring.proxy());
+fn on_lock(s: &mut LockscreenApp, ev: &ExtSessionLockV1Event) {
+    s.session.on_lock(ev, &mut s.ring, &mut s.wm);
+}
 
-    let state = LockscreenState {
-        ring,
-        wm,
-        timer,
-        handle,
-        pointer: Point::new(-1.0, -1.0),
-        datetime: DateTime::new(),
-    };
+/// Click delivery may complete a PIN; drain the offer right after.
+fn dispatch_press(s: &mut LockscreenApp, point: Point, handle: WindowHandle<Lockscreen>) {
+    if s.open {
+        request_exit(s);
+        return;
+    }
+    handle.set(PinClick(point), &mut s.wm);
+    take_pin(s);
+}
 
-    let mut app = app::App::new(state)
-        .mount(io_ring::module())
-        .mount(window_manager::module())
-        .mount(timer::module())
-        .mount(DateTime::module())
-        .mount(
-            app::Module::new()
-                .on(on_pointer)
-                .on(on_touch)
-                .on(on_start)
-                .on(on_timer)
-                .on(on_datetime_changed),
-        );
-
-    app.dispatch(&app::Start);
-    loop {
-        app.dispatch(&app::PrePoll);
-        app.dispatch(&app::Poll);
+fn take_pin(s: &mut LockscreenApp) {
+    if let Some(outcome) = s.auth.submit_pending(Instant::now()) {
+        broadcast_outcome(s, outcome);
     }
 }
 
-fn schedule_next_update(s: &mut LockscreenState) {
-    let next_at = s.datetime.next_deadline();
-    s.timer.start_deadline(Absolute {
-        at: next_at,
-        clock: Clock::Realtime,
-    });
-}
-
-fn on_start(s: &mut LockscreenState, _: &app::Start) -> DateTimeTick {
-    schedule_next_update(s);
-    DateTimeTick
-}
-
-fn on_timer(s: &mut LockscreenState, _ev: &TimerEvent) -> DateTimeTick {
-    schedule_next_update(s);
-    DateTimeTick
-}
-
-fn on_datetime_changed(s: &mut LockscreenState, _: &DateTimeChanged) {
-    update_time(s);
-}
-
-fn update_time(s: &mut LockscreenState) {
-    let time = DateTime::format("%H:%M");
-    let date = DateTime::format("%a %d");
-    s.handle.set(DateTimeUpdate { time, date }, &mut s.wm);
-}
-
-fn handle_click(s: &mut LockscreenState) {
-    s.handle.set(PinClick(s.pointer), &mut s.wm);
-}
-
-fn handle_release(s: &mut LockscreenState) {
-    s.handle.set(PinRelease, &mut s.wm);
-}
-
-fn on_touch(s: &mut LockscreenState, ev: &WlTouchEvent) {
-    match ev {
-        WlTouchEvent::Down { x, y, .. } => {
-            s.pointer = Point::new(*x, *y);
-            handle_click(s);
-        }
-        WlTouchEvent::Motion { x, y, .. } => {
-            s.pointer = Point::new(*x, *y);
-        }
-        WlTouchEvent::Up { .. } | WlTouchEvent::Cancel { .. } => {
-            handle_release(s);
-        }
-        _ => {}
-    }
-}
-
-fn on_pointer(s: &mut LockscreenState, ev: &WlPointerEvent) {
+fn on_pointer(s: &mut LockscreenApp, ev: &WlPointerEvent) {
     match ev {
         WlPointerEvent::Enter {
             surface_x,
@@ -272,24 +189,205 @@ fn on_pointer(s: &mut LockscreenState, ev: &WlPointerEvent) {
         } => {
             s.pointer = Point::new(*surface_x, *surface_y);
         }
-        WlPointerEvent::Leave { .. } => {
-            handle_release(s);
-        }
         WlPointerEvent::Button {
             state: WlPointerButtonState::Pressed,
-            button,
             ..
-        } if *button == BTN_LEFT => {
-            handle_click(s);
+        } => {
+            if let Some(handle) = s.session.focused(&s.wm) {
+                dispatch_press(s, s.pointer, handle);
+            }
         }
         WlPointerEvent::Button {
             state: WlPointerButtonState::Released,
-            button,
             ..
-        } if *button == BTN_LEFT => {
-            handle_release(s);
+        } => {
+            if let Some(handle) = s.session.focused(&s.wm) {
+                handle.set(PinRelease, &mut s.wm);
+            }
         }
         _ => {}
     }
 }
 
+fn on_touch(s: &mut LockscreenApp, ev: &WlTouchEvent) {
+    match ev {
+        WlTouchEvent::Down { surface, x, y, .. } => {
+            let Some(surface_id) = surface.object_id() else {
+                return;
+            };
+            let Some(handle) = s.session.window_for_touch(surface_id) else {
+                return;
+            };
+            dispatch_press(s, Point::new(*x, *y), handle);
+        }
+        WlTouchEvent::Up { .. } | WlTouchEvent::Cancel { .. } => {
+            if let Some(handle) = s.session.window() {
+                handle.set(PinRelease, &mut s.wm);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn on_io_event(s: &mut LockscreenApp, ev: &IoEvent) -> Option<AuthFinished> {
+    s.auth.take_verdict(ev, &s.ring).map(AuthFinished)
+}
+
+fn on_auth_finished(s: &mut LockscreenApp, ev: &AuthFinished) {
+    match s.auth.resolve(ev.0, Instant::now(), &mut s.timer) {
+        AuthResult::Unlocked => request_exit(s),
+        AuthResult::Displayed(outcome) => broadcast_outcome(s, outcome),
+    }
+}
+
+fn request_exit(s: &mut LockscreenApp) {
+    s.session.request_exit(&mut s.ring, &mut s.wm);
+}
+
+fn broadcast_outcome(s: &mut LockscreenApp, outcome: PinOutcome) {
+    s.status = outcome;
+    if let Some(handle) = s.session.window() {
+        handle.set(outcome, &mut s.wm);
+    }
+}
+
+fn schedule_next_update(s: &mut LockscreenApp) {
+    let next_at = s.datetime.next_deadline();
+    s.timer.start_deadline(Absolute {
+        at: next_at,
+        clock: Clock::Realtime,
+    });
+}
+
+fn on_start(s: &mut LockscreenApp, _: &Start) -> DateTimeTick {
+    schedule_next_update(s);
+    DateTimeTick
+}
+
+fn on_timer(s: &mut LockscreenApp, ev: &TimerEvent) -> DateTimeTick {
+    if s.auth.lockout_wake(ev) {
+        if s.auth.lockout_expired() {
+            broadcast_outcome(s, PinOutcome::Prompt);
+        }
+        return DateTimeTick;
+    }
+    schedule_next_update(s);
+    DateTimeTick
+}
+
+fn on_datetime_changed(s: &mut LockscreenApp, _: &DateTimeChanged) {
+    if s.auth.lockout_expired() {
+        broadcast_outcome(s, PinOutcome::Prompt);
+    }
+    let update = DateTimeUpdate {
+        time: DateTime::format("%H:%M"),
+        date: DateTime::format("%a %d"),
+    };
+    if let Some(handle) = s.session.window() {
+        handle.set(update, &mut s.wm);
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // RUST_LOG wins if set; otherwise default to info so auth outcomes and
+    // config validation are visible on a stock device.
+    let filter = EnvFilter::builder()
+        .with_default_directive(LevelFilter::INFO.into())
+        .from_env_lossy();
+    tracing_subscriber::fmt().with_env_filter(filter).init();
+
+    let enforced = auth::pin::validate_installed();
+    match &enforced {
+        Ok(cfg) => tracing::info!(
+            "PIN PAM stack enforced: {} (pwdfile={})",
+            auth::pin::SERVICE_NAME,
+            cfg.pwdfile
+        ),
+        Err(e) => tracing::error!("{e}; PIN authentication disabled"),
+    }
+
+    let username = auth::session_user();
+    if username.is_none() {
+        tracing::error!("could not resolve session user; PIN authentication disabled");
+    }
+    // Open mode: recipe legal, identity known, but the book has no entry for
+    // it - no PIN was ever set, so a tap authorizes the unlock.
+    let (available, open) = match (&enforced, username.as_deref()) {
+        (Ok(cfg), Some(user)) => {
+            if pin::pin_listed(&cfg.path, user) {
+                (true, false)
+            } else {
+                tracing::info!("no PIN registered for {user}; tap to unlock");
+                (true, true)
+            }
+        }
+        _ => (false, false),
+    };
+    let policy = Policy::new();
+    let offer: PinOffer = Rc::new(RefCell::new(None));
+    let ring = Ring::default();
+
+    let (result_rx, result_tx) = rustix::pipe::pipe().map_err(|e| {
+        std::io::Error::new(
+            e.kind(),
+            format!("pipe() failed for auth result channel: {e}"),
+        )
+    })?;
+    let auth = PinAuth::new(
+        policy,
+        username.unwrap_or_default(),
+        available && !open,
+        result_rx,
+        result_tx,
+        Rc::clone(&offer),
+        ring.proxy(),
+    );
+
+    let mut wm = WindowManager::new(ring.proxy());
+    wm.upload_atlas(&atlas::LOCKSCREEN);
+    let timer = Timer::new(ring.proxy());
+    let session = Session::new(open, policy.pin_len, offer);
+
+    let status = if available {
+        PinOutcome::Prompt
+    } else {
+        PinOutcome::Unavailable
+    };
+
+    let state = LockscreenApp {
+        auth,
+        session,
+        status,
+        open,
+        pointer: Point::new(-1.0, -1.0),
+        ring,
+        wm,
+        timer,
+        datetime: DateTime::new(),
+    };
+
+    let mut app = App::new(state)
+        .mount(io_ring::module())
+        .mount(window_manager::module())
+        .mount(timer::module())
+        .mount(DateTime::module())
+        .mount(
+            Module::new()
+                .on(on_registry)
+                .on(on_configure)
+                .on(on_lock)
+                .on(on_pointer)
+                .on(on_touch)
+                .on(on_io_event)
+                .on(on_auth_finished)
+                .on(on_start)
+                .on(on_timer)
+                .on(on_datetime_changed),
+        );
+
+    app.dispatch(&Start);
+    loop {
+        app.dispatch(&PrePoll);
+        app.dispatch(&Poll);
+    }
+}

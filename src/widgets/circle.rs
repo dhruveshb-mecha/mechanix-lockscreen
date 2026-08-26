@@ -1,9 +1,9 @@
-use renderer::commands::Color;
 use taffy::prelude::*;
 use taffy::{Size, Style};
 use ui::widgets::{BorderColor, Div};
 use ui::{Damage, OnChange, Point, Render, RenderCommand};
 use utils::Rect as UtilsRect;
+use window_manager::Color;
 
 #[ui::widget]
 pub struct Circle {
@@ -40,6 +40,12 @@ impl Circle {
             is_opaque: true,
             children: c,
         }
+    }
+}
+
+impl Default for Circle {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

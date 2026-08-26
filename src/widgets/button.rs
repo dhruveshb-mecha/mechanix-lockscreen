@@ -1,9 +1,9 @@
-use renderer::commands::Color;
 use taffy::prelude::*;
 use taffy::{Size, Style};
 use ui::widgets::{BorderColor, Div, Text};
 use ui::{Damage, OnChange, Point, Render, RenderCommand};
 use utils::Rect as UtilsRect;
+use window_manager::Color;
 
 use crate::atlas;
 

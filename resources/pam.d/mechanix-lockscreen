@@ -1,0 +1,4 @@
+# mechanix-lockscreen PAM stack.
+#
+# Install to: /etc/pam.d/mechanix-lockscreen
+auth	required	pam_pwdfile.so pwdfile=/etc/mechanix/pin.passwd
