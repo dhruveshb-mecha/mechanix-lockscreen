@@ -1,4 +1,5 @@
-use super::button::Button;
+use super::{Button, IconButton};
+use crate::atlas;
 use taffy::prelude::*;
 use taffy::{Size, Style};
 use ui::widgets::Div;
@@ -12,7 +13,7 @@ fn keypad_grid_style() -> Style {
         align_items: Some(AlignItems::Center),
         gap: Size {
             width: zero(),
-            height: length(12.0_f32),
+            height: length(8.0_f32),
         },
         ..Style::default()
     }
@@ -26,19 +27,22 @@ fn keypad_row_style() -> Style {
         justify_content: Some(JustifyContent::Center),
         align_items: Some(AlignItems::Center),
         gap: Size {
-            width: length(10.0_f32),
+            width: length(8.0_f32),
             height: zero(),
         },
         ..Style::default()
     }
 }
 
-/// Layout style for the empty button spacer.
-fn empty_button_style() -> Style {
+/// Layout style for the ENTER P/W button.
+fn enter_pw_button_style() -> Style {
     Style {
+        display: Display::Flex,
+        justify_content: Some(JustifyContent::Center),
+        align_items: Some(AlignItems::Center),
         size: Size {
-            width: length(152.0_f32),
-            height: length(56.0_f32),
+            width: length(162.0_f32),
+            height: length(72.0_f32),
         },
         ..Style::default()
     }
@@ -51,15 +55,15 @@ fn backspace_button_style() -> Style {
         justify_content: Some(JustifyContent::Center),
         align_items: Some(AlignItems::Center),
         size: Size {
-            width: length(152.0_f32),
-            height: length(56.0_f32),
+            width: length(162.0_f32),
+            height: length(72.0_f32),
         },
         ..Style::default()
     }
 }
 
 type KeypadRow3 = Div<(Button, Button, Button)>;
-type KeypadRow4 = Div<(Div<()>, Button, Button)>;
+type KeypadRow4 = Div<(Button, Button, IconButton)>;
 
 type GridPair1 = (KeypadRow3, KeypadRow3);
 type GridPair2 = (KeypadRow3, KeypadRow4);
@@ -100,13 +104,16 @@ impl Numpad {
             (Button::new("7"), Button::new("8"), Button::new("9")),
         );
 
-        let empty_space = Div::new(empty_button_style(), ());
         let row4 = Div::new(
             keypad_row_style(),
             (
-                empty_space,
+                Button::transparent_with_style("ENTER P/W", enter_pw_button_style()),
                 Button::new("0"),
-                Button::transparent_with_style("BACKSPACE", backspace_button_style()),
+                IconButton::new(
+                    atlas::LOCKSCREEN_BACKSPACE,
+                    atlas::LOCKSCREEN.id,
+                    backspace_button_style(),
+                ),
             ),
         );
 
@@ -169,7 +176,7 @@ impl Numpad {
             8 => Some(&mut self.children.children.1.0.children.1),
             9 => Some(&mut self.children.children.1.0.children.2),
             0 => Some(&mut self.children.children.1.1.children.1),
-            10 => Some(&mut self.children.children.1.1.children.2),
+            11 => Some(&mut self.children.children.1.1.children.0),
             _ => None,
         }
     }

@@ -1,6 +1,10 @@
 [[atlas]]
 name = "lockscreen"
 
+[[atlas.sprite]]
+name = "backspace"
+path = "assets/backspace.png"
+
 [[atlas.font]]
 name = "geist_mono"
 path = "assets/GeistMono-Regular.ttf"
