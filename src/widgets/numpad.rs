@@ -34,12 +34,10 @@ fn keypad_row_style() -> Style {
     }
 }
 
-/// Layout style for the ENTER P/W button.
-fn enter_pw_button_style() -> Style {
+/// Layout style for empty spacer slot in row 4.
+fn empty_slot_style() -> Style {
     Style {
         display: Display::Flex,
-        justify_content: Some(JustifyContent::Center),
-        align_items: Some(AlignItems::Center),
         size: Size {
             width: length(162.0_f32),
             height: length(72.0_f32),
@@ -63,7 +61,7 @@ fn backspace_button_style() -> Style {
 }
 
 type KeypadRow3 = Div<(Button, Button, Button)>;
-type KeypadRow4 = Div<(Button, Button, IconButton)>;
+type KeypadRow4 = Div<(Div<()>, Button, IconButton)>;
 
 type GridPair1 = (KeypadRow3, KeypadRow3);
 type GridPair2 = (KeypadRow3, KeypadRow4);
@@ -107,7 +105,7 @@ impl Numpad {
         let row4 = Div::new(
             keypad_row_style(),
             (
-                Button::transparent_with_style("ENTER P/W", enter_pw_button_style()),
+                Div::new(empty_slot_style(), ()),
                 Button::new("0"),
                 IconButton::new(
                     atlas::LOCKSCREEN_BACKSPACE,

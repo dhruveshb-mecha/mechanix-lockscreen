@@ -13,7 +13,7 @@ use window_manager::{Color, Surface, WindowManager, prelude::*};
 use crate::events::{PinOffer, PinOutcome};
 use crate::widgets::Lockscreen;
 
-const BG: Color = Color::from_rgb8(0, 0, 0);
+const BG: Color = Color::from_rgb8(20, 20, 21);
 
 enum LockSurface {
     Waiting,

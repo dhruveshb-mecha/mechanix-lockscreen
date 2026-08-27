@@ -7,7 +7,7 @@ use window_manager::Color;
 
 use crate::atlas;
 
-const BORDER_COLOR: Color = Color::from_rgb8(255, 255, 255);
+const BORDER_COLOR: Color = Color::from_rgb8(35, 35, 37);
 
 pub fn filled_button_style() -> Style {
     Style {
@@ -28,16 +28,8 @@ pub fn filled_button_style() -> Style {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ButtonType {
-    #[default]
-    Filled,
-    Transparent,
-}
-
 #[ui::widget]
 pub struct Button {
-    pub kind: ButtonType,
     #[widget(child)]
     pub children: Div<(Text,)>,
 }
@@ -63,7 +55,7 @@ impl Button {
         btn.color = Color::TRANSPARENT;
         btn.border_color = BorderColor(BORDER_COLOR);
         btn.border_thickness = 1.0;
-        btn.border_radius = 0.0;
+        btn.border_radius = 1.0;
 
         Self {
             node_id: taffy::NodeId::new(u64::MAX),
@@ -71,38 +63,6 @@ impl Button {
             bounds: UtilsRect::ZERO,
             pending_damage: Damage::None,
             is_opaque: true,
-            kind: ButtonType::Filled,
-            children: btn,
-        }
-    }
-
-    pub fn transparent_with_style(num: &str, style: Style) -> Self {
-        Self::transparent_with_font_and_style(num, &atlas::LOCKSCREEN_FONT_GEIST_MONO_12, style)
-    }
-
-    pub fn transparent_with_font_and_style(
-        label: &str,
-        font: &'static assets::BakedFont,
-        style: Style,
-    ) -> Self {
-        let mut txt = Text::new(Style::default());
-        txt.font = Some(font);
-        txt.color = Color::from_rgb8(161, 161, 165);
-        txt.text = label.into();
-
-        let mut btn = Div::new(style.clone(), (txt,));
-        btn.color = Color::TRANSPARENT;
-        btn.border_color = BorderColor(Color::TRANSPARENT);
-        btn.border_thickness = 0.0;
-        btn.border_radius = 0.0;
-
-        Self {
-            node_id: taffy::NodeId::new(u64::MAX),
-            style,
-            bounds: UtilsRect::ZERO,
-            pending_damage: Damage::None,
-            is_opaque: true,
-            kind: ButtonType::Transparent,
             children: btn,
         }
     }
@@ -114,16 +74,12 @@ impl OnChange<bool> for Button {
     }
 
     fn change(&mut self, is_active: bool) {
-        match (self.kind, is_active) {
-            (ButtonType::Transparent, _) => {}
-            (ButtonType::Filled, true) => {
-                self.children.set(Color::from_rgb8(35, 35, 37));
-                self.children.set(BorderColor(BORDER_COLOR));
-            }
-            (ButtonType::Filled, false) => {
-                self.children.set(Color::TRANSPARENT);
-                self.children.set(BorderColor(BORDER_COLOR));
-            }
+        if is_active {
+            self.children.set(Color::from_rgb8(35, 35, 37));
+            self.children.set(BorderColor(BORDER_COLOR));
+        } else {
+            self.children.set(Color::TRANSPARENT);
+            self.children.set(BorderColor(BORDER_COLOR));
         }
     }
 }
