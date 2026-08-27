@@ -71,7 +71,7 @@ impl OnChange<ScreenState> for BottomBar {
     fn change(&mut self, state: ScreenState) {
         match state {
             ScreenState::TapToExpand => self.set_text("TAP TO EXPAND"),
-            ScreenState::PinLock => self.set_text("CANCEL"),
+            ScreenState::PinLock => self.set_text(""),
         }
     }
 }

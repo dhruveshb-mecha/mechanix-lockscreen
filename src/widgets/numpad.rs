@@ -1,4 +1,5 @@
-use super::button::Button;
+use super::{Button, IconButton};
+use crate::atlas;
 use taffy::prelude::*;
 use taffy::{Size, Style};
 use ui::widgets::Div;
@@ -12,7 +13,7 @@ fn keypad_grid_style() -> Style {
         align_items: Some(AlignItems::Center),
         gap: Size {
             width: zero(),
-            height: length(12.0_f32),
+            height: length(8.0_f32),
         },
         ..Style::default()
     }
@@ -26,19 +27,20 @@ fn keypad_row_style() -> Style {
         justify_content: Some(JustifyContent::Center),
         align_items: Some(AlignItems::Center),
         gap: Size {
-            width: length(10.0_f32),
+            width: length(8.0_f32),
             height: zero(),
         },
         ..Style::default()
     }
 }
 
-/// Layout style for the empty button spacer.
-fn empty_button_style() -> Style {
+/// Layout style for empty spacer slot in row 4.
+fn empty_slot_style() -> Style {
     Style {
+        display: Display::Flex,
         size: Size {
-            width: length(152.0_f32),
-            height: length(56.0_f32),
+            width: length(162.0_f32),
+            height: length(72.0_f32),
         },
         ..Style::default()
     }
@@ -51,15 +53,15 @@ fn backspace_button_style() -> Style {
         justify_content: Some(JustifyContent::Center),
         align_items: Some(AlignItems::Center),
         size: Size {
-            width: length(152.0_f32),
-            height: length(56.0_f32),
+            width: length(162.0_f32),
+            height: length(72.0_f32),
         },
         ..Style::default()
     }
 }
 
 type KeypadRow3 = Div<(Button, Button, Button)>;
-type KeypadRow4 = Div<(Div<()>, Button, Button)>;
+type KeypadRow4 = Div<(Div<()>, Button, IconButton)>;
 
 type GridPair1 = (KeypadRow3, KeypadRow3);
 type GridPair2 = (KeypadRow3, KeypadRow4);
@@ -100,13 +102,16 @@ impl Numpad {
             (Button::new("7"), Button::new("8"), Button::new("9")),
         );
 
-        let empty_space = Div::new(empty_button_style(), ());
         let row4 = Div::new(
             keypad_row_style(),
             (
-                empty_space,
+                Div::new(empty_slot_style(), ()),
                 Button::new("0"),
-                Button::transparent_with_style("BACKSPACE", backspace_button_style()),
+                IconButton::new(
+                    atlas::LOCKSCREEN_BACKSPACE,
+                    atlas::LOCKSCREEN.id,
+                    backspace_button_style(),
+                ),
             ),
         );
 
@@ -122,7 +127,7 @@ impl Numpad {
         }
     }
 
-    fn buttons(&self) -> [(&Button, NumpadAction); 11] {
+    fn buttons(&self) -> [(&Button, NumpadAction); 10] {
         let (row1, row2) = &self.children.children.0;
         let (row3, row4) = &self.children.children.1;
         [
@@ -136,11 +141,15 @@ impl Numpad {
             (&row3.children.1, NumpadAction::Digit('8')),
             (&row3.children.2, NumpadAction::Digit('9')),
             (&row4.children.1, NumpadAction::Digit('0')),
-            (&row4.children.2, NumpadAction::Backspace),
         ]
     }
 
-    fn buttons_mut(&mut self) -> [(u8, &mut Button); 11] {
+    fn icon_buttons(&self) -> [(&IconButton, NumpadAction); 1] {
+        let row4 = &self.children.children.1.1;
+        [(&row4.children.2, NumpadAction::Backspace)]
+    }
+
+    fn buttons_mut(&mut self) -> [(u8, &mut Button); 10] {
         let (row1, row2) = &mut self.children.children.0;
         let (row3, row4) = &mut self.children.children.1;
         [
@@ -154,21 +163,44 @@ impl Numpad {
             (8, &mut row3.children.1),
             (9, &mut row3.children.2),
             (0, &mut row4.children.1),
-            (10, &mut row4.children.2),
         ]
+    }
+
+    fn icon_buttons_mut(&mut self) -> [(u8, &mut IconButton); 1] {
+        let row4 = &mut self.children.children.1.1;
+        [(10, &mut row4.children.2)]
     }
 
     /// Returns the action (Digit or Backspace) at point `p`.
     pub fn hit_action(&self, p: Point) -> Option<NumpadAction> {
-        self.buttons()
+        if let Some((_, action)) = self
+            .buttons()
             .into_iter()
             .find(|(btn, _)| btn.own_bounds().contains_point(p))
-            .map(|(_, action)| action)
+        {
+            return Some(action);
+        }
+        if let Some((_, action)) = self
+            .icon_buttons()
+            .into_iter()
+            .find(|(btn, _)| btn.own_bounds().contains_point(p))
+        {
+            return Some(action);
+        }
+        None
     }
 
     /// Returns a mutable reference to the `Button` associated with the specified button ID.
     pub fn button_mut(&mut self, id: u8) -> Option<&mut Button> {
         self.buttons_mut()
+            .into_iter()
+            .find(|(btn_id, _)| *btn_id == id)
+            .map(|(_, btn)| btn)
+    }
+
+    /// Returns a mutable reference to the `IconButton` associated with the specified button ID.
+    pub fn icon_button_mut(&mut self, id: u8) -> Option<&mut IconButton> {
+        self.icon_buttons_mut()
             .into_iter()
             .find(|(btn_id, _)| *btn_id == id)
             .map(|(_, btn)| btn)
