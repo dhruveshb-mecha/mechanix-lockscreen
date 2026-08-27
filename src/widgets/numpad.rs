@@ -122,56 +122,56 @@ impl Numpad {
         }
     }
 
+    fn buttons(&self) -> [(&Button, NumpadAction); 11] {
+        let (row1, row2) = &self.children.children.0;
+        let (row3, row4) = &self.children.children.1;
+        [
+            (&row1.children.0, NumpadAction::Digit('1')),
+            (&row1.children.1, NumpadAction::Digit('2')),
+            (&row1.children.2, NumpadAction::Digit('3')),
+            (&row2.children.0, NumpadAction::Digit('4')),
+            (&row2.children.1, NumpadAction::Digit('5')),
+            (&row2.children.2, NumpadAction::Digit('6')),
+            (&row3.children.0, NumpadAction::Digit('7')),
+            (&row3.children.1, NumpadAction::Digit('8')),
+            (&row3.children.2, NumpadAction::Digit('9')),
+            (&row4.children.1, NumpadAction::Digit('0')),
+            (&row4.children.2, NumpadAction::Backspace),
+        ]
+    }
+
+    fn buttons_mut(&mut self) -> [(u8, &mut Button); 11] {
+        let (row1, row2) = &mut self.children.children.0;
+        let (row3, row4) = &mut self.children.children.1;
+        [
+            (1, &mut row1.children.0),
+            (2, &mut row1.children.1),
+            (3, &mut row1.children.2),
+            (4, &mut row2.children.0),
+            (5, &mut row2.children.1),
+            (6, &mut row2.children.2),
+            (7, &mut row3.children.0),
+            (8, &mut row3.children.1),
+            (9, &mut row3.children.2),
+            (0, &mut row4.children.1),
+            (10, &mut row4.children.2),
+        ]
+    }
+
     /// Returns the action (Digit or Backspace) at point `p`.
     pub fn hit_action(&self, p: Point) -> Option<NumpadAction> {
-        let row1 = &self.children.children.0.0;
-        let row2 = &self.children.children.0.1;
-        let row3 = &self.children.children.1.0;
-        let row4 = &self.children.children.1.1;
-
-        if row1.children.0.own_bounds().contains_point(p) {
-            Some(NumpadAction::Digit('1'))
-        } else if row1.children.1.own_bounds().contains_point(p) {
-            Some(NumpadAction::Digit('2'))
-        } else if row1.children.2.own_bounds().contains_point(p) {
-            Some(NumpadAction::Digit('3'))
-        } else if row2.children.0.own_bounds().contains_point(p) {
-            Some(NumpadAction::Digit('4'))
-        } else if row2.children.1.own_bounds().contains_point(p) {
-            Some(NumpadAction::Digit('5'))
-        } else if row2.children.2.own_bounds().contains_point(p) {
-            Some(NumpadAction::Digit('6'))
-        } else if row3.children.0.own_bounds().contains_point(p) {
-            Some(NumpadAction::Digit('7'))
-        } else if row3.children.1.own_bounds().contains_point(p) {
-            Some(NumpadAction::Digit('8'))
-        } else if row3.children.2.own_bounds().contains_point(p) {
-            Some(NumpadAction::Digit('9'))
-        } else if row4.children.1.own_bounds().contains_point(p) {
-            Some(NumpadAction::Digit('0'))
-        } else if row4.children.2.own_bounds().contains_point(p) {
-            Some(NumpadAction::Backspace)
-        } else {
-            None
-        }
+        self.buttons()
+            .into_iter()
+            .find(|(btn, _)| btn.own_bounds().contains_point(p))
+            .map(|(_, action)| action)
     }
 
     /// Returns a mutable reference to the `Button` associated with the specified button ID.
     pub fn button_mut(&mut self, id: u8) -> Option<&mut Button> {
-        match id {
-            1 => Some(&mut self.children.children.0.0.children.0),
-            2 => Some(&mut self.children.children.0.0.children.1),
-            3 => Some(&mut self.children.children.0.0.children.2),
-            4 => Some(&mut self.children.children.0.1.children.0),
-            5 => Some(&mut self.children.children.0.1.children.1),
-            6 => Some(&mut self.children.children.0.1.children.2),
-            7 => Some(&mut self.children.children.1.0.children.0),
-            8 => Some(&mut self.children.children.1.0.children.1),
-            9 => Some(&mut self.children.children.1.0.children.2),
-            0 => Some(&mut self.children.children.1.1.children.1),
-            10 => Some(&mut self.children.children.1.1.children.2),
-            _ => None,
-        }
+        self.buttons_mut()
+            .into_iter()
+            .find(|(btn_id, _)| *btn_id == id)
+            .map(|(_, btn)| btn)
     }
 }
 

@@ -10,7 +10,7 @@ fmt-check:
     cargo fmt --all --check
 
 clippy:
-    cargo clippy --all-targets --all-features
+    cargo clippy --all-targets --all-features -- -D warnings
 
 build:
     cargo build
@@ -21,7 +21,7 @@ test:
 ci: fmt-check clippy build test
 
 image:
-    podman build -f Dockerfile.cross -t {{image}} .
+    podman build -f Dockerfile.cross -t {{ image }} .
 
 cross:
-    "${CARGO_HOME:-$HOME/.cargo}/bin/cross" build --release --target {{target}}
+    "${CARGO_HOME:-$HOME/.cargo}/bin/cross" build --release --target {{ target }}

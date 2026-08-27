@@ -8,22 +8,22 @@ name = "mechanix-lockscreen"
 path = "src/main.rs"
 
 [dependencies]
-app            = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
+app = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
+assets = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
+io-ring = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
+timer = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
+ui = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
+utils = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
+wayland = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01", features = ["client"] }
 window-manager = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
-io-ring        = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
-wayland        = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01", features = ["client"] }
-ui             = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
-assets         = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
-utils          = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
-timer          = { git = "https://github.com/mecha-org/mecha-wayland", rev = "ba1d36ec1edc39ab92e9ef17df69f456a7c32f01" }
 
-chrono    = "0.4"
-io-uring  = "0.7"
-libc      = "0.2"
-nonstick  = "0.1.2"
-rustix    = { version = "1.1.4", features = ["pipe"] }
-taffy     = "0.10.1"
-tracing   = "0.1"
+chrono = "0.4"
+io-uring = "0.7"
+libc = "0.2"
+nonstick = "0.1.2"
+rustix = { version = "1.1.4", features = ["pipe"] }
+taffy = "0.10.1"
+tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [build-dependencies]
