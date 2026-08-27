@@ -8,8 +8,6 @@ use window_manager::Color;
 use crate::atlas;
 use crate::widgets::datetime::{DateTime, DateTimeUpdate};
 
-pub type TimeUpdate = DateTimeUpdate;
-
 fn header_style() -> Style {
     Style {
         display: Display::Flex,

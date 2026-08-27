@@ -223,6 +223,10 @@ impl PinWidget {
     }
 
     fn apply_action(&mut self, action: NumpadAction) {
+        if matches!(self.status, PinOutcome::Incorrect) {
+            self.status = PinOutcome::Prompt;
+            self.render_status();
+        }
         match action {
             NumpadAction::Digit(c) => {
                 if !c.is_ascii_digit() {

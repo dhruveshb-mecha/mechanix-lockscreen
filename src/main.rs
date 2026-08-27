@@ -1,9 +1,9 @@
-#![recursion_limit = "2048"]
 pub mod atlas {
     include!(concat!(env!("OUT_DIR"), "/lockscreen_gen.rs"));
 }
 
 pub mod auth;
+mod channel;
 pub mod events;
 mod session;
 pub mod widgets;
@@ -25,7 +25,8 @@ use wayland::{
 use window_manager::prelude::*;
 
 use auth::AuthFinished;
-use auth::pin::{self, Gate, Policy, ResultChannel, Trigger};
+use auth::pin::{self, Gate, Policy};
+use channel::{ResultChannel, Trigger};
 use events::{PinClick, PinOffer, PinOutcome, PinRelease};
 use session::Session;
 use widgets::{DateTime, DateTimeChanged, DateTimeTick, DateTimeUpdate, Lockscreen};
@@ -59,12 +60,17 @@ impl PinAuth {
         offer: PinOffer,
         proxy: io_ring::RingProxy,
     ) -> Self {
+        let trigger = Trigger::new(write_fd, move |pin: &str| {
+            pin::authenticate(&username, pin)
+                .inspect_err(|e| tracing::warn!("PAM authentication failed: {e}"))
+                .is_ok()
+        });
         Self {
             gate: Gate::new(policy.max_attempts, policy.lockout),
             policy,
             available,
             rx: ResultChannel::new(read_fd, proxy),
-            trigger: Trigger::new(username, write_fd),
+            trigger,
             pending: offer,
             lockout_timer: None,
         }
@@ -171,7 +177,7 @@ fn dispatch_press(s: &mut LockscreenApp, point: Point, handle: WindowHandle<Lock
 
 fn take_pin(s: &mut LockscreenApp) {
     if let Some(outcome) = s.auth.submit_pending(Instant::now()) {
-        broadcast_outcome(s, outcome);
+        set_outcome(s, outcome);
     }
 }
 
@@ -212,10 +218,7 @@ fn on_pointer(s: &mut LockscreenApp, ev: &WlPointerEvent) {
 fn on_touch(s: &mut LockscreenApp, ev: &WlTouchEvent) {
     match ev {
         WlTouchEvent::Down { surface, x, y, .. } => {
-            let Some(surface_id) = surface.object_id() else {
-                return;
-            };
-            let Some(handle) = s.session.window_for_touch(surface_id) else {
+            let Some(handle) = s.session.window_for_touch(surface) else {
                 return;
             };
             dispatch_press(s, Point::new(*x, *y), handle);
@@ -236,7 +239,7 @@ fn on_io_event(s: &mut LockscreenApp, ev: &IoEvent) -> Option<AuthFinished> {
 fn on_auth_finished(s: &mut LockscreenApp, ev: &AuthFinished) {
     match s.auth.resolve(ev.0, Instant::now(), &mut s.timer) {
         AuthResult::Unlocked => request_exit(s),
-        AuthResult::Displayed(outcome) => broadcast_outcome(s, outcome),
+        AuthResult::Displayed(outcome) => set_outcome(s, outcome),
     }
 }
 
@@ -244,7 +247,7 @@ fn request_exit(s: &mut LockscreenApp) {
     s.session.request_exit(&mut s.ring, &mut s.wm);
 }
 
-fn broadcast_outcome(s: &mut LockscreenApp, outcome: PinOutcome) {
+fn set_outcome(s: &mut LockscreenApp, outcome: PinOutcome) {
     s.status = outcome;
     if let Some(handle) = s.session.window() {
         handle.set(outcome, &mut s.wm);
@@ -267,7 +270,7 @@ fn on_start(s: &mut LockscreenApp, _: &Start) -> DateTimeTick {
 fn on_timer(s: &mut LockscreenApp, ev: &TimerEvent) -> DateTimeTick {
     if s.auth.lockout_wake(ev) {
         if s.auth.lockout_expired() {
-            broadcast_outcome(s, PinOutcome::Prompt);
+            set_outcome(s, PinOutcome::Prompt);
         }
         return DateTimeTick;
     }
@@ -277,7 +280,7 @@ fn on_timer(s: &mut LockscreenApp, ev: &TimerEvent) -> DateTimeTick {
 
 fn on_datetime_changed(s: &mut LockscreenApp, _: &DateTimeChanged) {
     if s.auth.lockout_expired() {
-        broadcast_outcome(s, PinOutcome::Prompt);
+        set_outcome(s, PinOutcome::Prompt);
     }
     let update = DateTimeUpdate {
         time: DateTime::format("%H:%M"),

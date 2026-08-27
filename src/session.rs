@@ -5,8 +5,8 @@ use std::time::Duration;
 use io_ring::Ring;
 use wayland::{
     ExtSessionLockManagerV1, ExtSessionLockSurfaceV1, ExtSessionLockSurfaceV1Event,
-    ExtSessionLockV1, ExtSessionLockV1Event, Handle, Interface, ObjectId, WlOutput,
-    WlRegistryEvent,
+    ExtSessionLockV1, ExtSessionLockV1Event, Handle, Interface, WlOutput, WlRegistryEvent,
+    WlSurface,
 };
 use window_manager::{Color, Surface, WindowManager, prelude::*};
 
@@ -15,17 +15,17 @@ use crate::widgets::Lockscreen;
 
 const BG: Color = Color::from_rgb8(0, 0, 0);
 
-enum Panel {
+enum LockSurface {
     Waiting,
     Armed(Handle<WlOutput>),
     Ready {
         window: WindowHandle<Lockscreen>,
-        wl_surface_id: ObjectId,
-        lock_surface_id: ObjectId,
+        wl_surface: Handle<WlSurface>,
+        lock_surface: Handle<ExtSessionLockSurfaceV1>,
     },
 }
 
-/// Owns the single lock surface and the ext-session-lock exit handshake.
+/// Owns the lock surface and the ext-session-lock exit handshake.
 pub(crate) struct Session {
     manager: Option<Handle<ExtSessionLockManagerV1>>,
     lock: Option<Handle<ExtSessionLockV1>>,
@@ -34,7 +34,7 @@ pub(crate) struct Session {
     open: bool,
     pin_len: usize,
     offer: PinOffer,
-    panel: Panel,
+    lock_surface: LockSurface,
 }
 
 impl Session {
@@ -47,7 +47,7 @@ impl Session {
             open,
             pin_len,
             offer,
-            panel: Panel::Waiting,
+            lock_surface: LockSurface::Waiting,
         }
     }
 
@@ -57,81 +57,70 @@ impl Session {
         wm: &mut WindowManager,
         status: PinOutcome,
     ) {
-        match ev {
-            WlRegistryEvent::Global {
-                sender,
-                name,
-                interface,
-                version,
-            } => {
-                if self.exiting {
-                    return;
-                }
-                match interface.as_str() {
-                    ExtSessionLockManagerV1::NAME => {
-                        if self.manager.is_none() {
-                            self.manager = Some(sender.bind(*name, *version));
-                            if let Panel::Armed(output) =
-                                std::mem::replace(&mut self.panel, Panel::Waiting)
-                                && let Err(e) = self.ensure_output(output, wm, status)
-                            {
-                                tracing::error!("failed to create lock surface: {e}");
-                            }
-                        }
+        if self.exiting {
+            return;
+        }
+        let WlRegistryEvent::Global {
+            sender,
+            name,
+            interface,
+            version,
+        } = ev
+        else {
+            return;
+        };
+        match interface.as_str() {
+            ExtSessionLockManagerV1::NAME => {
+                if self.manager.is_none() {
+                    self.manager = Some(sender.bind(*name, *version));
+                    if let LockSurface::Armed(output) =
+                        std::mem::replace(&mut self.lock_surface, LockSurface::Waiting)
+                    {
+                        self.create_lock_surface(output, wm, status);
                     }
-                    WlOutput::NAME => {
-                        let output = sender.bind(*name, *version);
-                        if let Err(e) = self.ensure_output(output, wm, status) {
-                            tracing::error!("failed to create lock surface: {e}");
-                        }
-                    }
-                    _ => {}
                 }
             }
-            // The physical panel is assumed permanent.
-            WlRegistryEvent::GlobalDelete { .. } => {}
+            WlOutput::NAME => {
+                let output = sender.bind(*name, *version);
+                self.create_lock_surface(output, wm, status);
+            }
+            _ => {}
         }
     }
 
-    fn ensure_output(
+    fn create_lock_surface(
         &mut self,
         output: Handle<WlOutput>,
         wm: &mut WindowManager,
         status: PinOutcome,
-    ) -> Result<(), &'static str> {
-        if self.exiting || !matches!(self.panel, Panel::Waiting) {
-            return Ok(());
-        }
+    ) {
+        let LockSurface::Waiting = self.lock_surface else {
+            return;
+        };
         let Some(manager) = self.manager.clone() else {
-            self.panel = Panel::Armed(output);
-            return Ok(());
+            self.lock_surface = LockSurface::Armed(output);
+            return;
         };
 
         let lock = self.lock.get_or_insert_with(|| manager.lock()).clone();
         let surface = wm.create_surface();
-        let wl_surface_id = surface
-            .object_id()
-            .ok_or("fresh surface has no object id")?;
         let lock_surface = lock.get_lock_surface(&surface, &output);
-        let lock_surface_id = lock_surface
-            .object_id()
-            .ok_or("fresh lock role has no object id")?;
-
         let window = wm.spawn_window_with(
             0,
             0,
             BG,
             Lockscreen::new(self.pin_len, Rc::clone(&self.offer), self.open),
-            surface,
-            Box::new(SessionLockSurface { lock_surface }),
+            surface.clone(),
+            Box::new(SessionLockSurface {
+                lock_surface: lock_surface.clone(),
+            }),
         );
         window.set(status, wm);
-        self.panel = Panel::Ready {
+        self.lock_surface = LockSurface::Ready {
             window,
-            wl_surface_id,
-            lock_surface_id,
+            wl_surface: surface,
+            lock_surface,
         };
-        Ok(())
     }
 
     pub(crate) fn route_configure(
@@ -145,13 +134,12 @@ impl Session {
             width,
             height,
         } = ev;
-        if let Some(id) = sender.object_id()
-            && let Panel::Ready {
-                window,
-                lock_surface_id,
-                ..
-            } = &self.panel
-            && *lock_surface_id == id
+        if let LockSurface::Ready {
+            window,
+            lock_surface,
+            ..
+        } = &self.lock_surface
+            && sender == lock_surface
         {
             wm.configure(window.id(), *serial, *width, *height);
         }
@@ -179,10 +167,9 @@ impl Session {
             return;
         }
         self.exiting = true;
-        if let Panel::Ready { window, .. } = &self.panel {
+        if let LockSurface::Ready { window, .. } = &self.lock_surface {
             wm.destroy(window.id());
         }
-        self.panel = Panel::Waiting;
         if let Some(lock) = self.lock.take() {
             if self.is_locked {
                 lock.unlock_and_destroy();
@@ -198,26 +185,24 @@ impl Session {
 
     pub(crate) fn focused(&self, wm: &WindowManager) -> Option<WindowHandle<Lockscreen>> {
         let focused = wm.current_pointer_window()?;
-        match &self.panel {
-            Panel::Ready { window, .. } if window.id() == focused => Some(*window),
-            _ => None,
-        }
+        self.window().filter(|w| w.id() == focused)
     }
 
-    pub(crate) fn window_for_touch(&self, surface: ObjectId) -> Option<WindowHandle<Lockscreen>> {
-        match &self.panel {
-            Panel::Ready {
-                window,
-                wl_surface_id,
-                ..
-            } if *wl_surface_id == surface => Some(*window),
+    pub(crate) fn window_for_touch(
+        &self,
+        surface: &Handle<WlSurface>,
+    ) -> Option<WindowHandle<Lockscreen>> {
+        match &self.lock_surface {
+            LockSurface::Ready {
+                window, wl_surface, ..
+            } if wl_surface == surface => Some(*window),
             _ => None,
         }
     }
 
     pub(crate) fn window(&self) -> Option<WindowHandle<Lockscreen>> {
-        match &self.panel {
-            Panel::Ready { window, .. } => Some(*window),
+        match &self.lock_surface {
+            LockSurface::Ready { window, .. } => Some(*window),
             _ => None,
         }
     }

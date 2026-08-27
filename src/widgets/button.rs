@@ -7,6 +7,8 @@ use window_manager::Color;
 
 use crate::atlas;
 
+const BORDER_COLOR: Color = Color::from_rgb8(255, 255, 255);
+
 pub fn filled_button_style() -> Style {
     Style {
         display: Display::Flex,
@@ -59,7 +61,7 @@ impl Button {
 
         let mut btn = Div::new(style.clone(), (txt,));
         btn.color = Color::TRANSPARENT;
-        btn.border_color = BorderColor(Color::from_rgb8(35, 35, 37));
+        btn.border_color = BorderColor(BORDER_COLOR);
         btn.border_thickness = 1.0;
         btn.border_radius = 0.0;
 
@@ -116,13 +118,11 @@ impl OnChange<bool> for Button {
             (ButtonType::Transparent, _) => {}
             (ButtonType::Filled, true) => {
                 self.children.set(Color::from_rgb8(35, 35, 37));
-                self.children
-                    .set(BorderColor(Color::from_rgb8(35, 35, 37)));
+                self.children.set(BorderColor(BORDER_COLOR));
             }
             (ButtonType::Filled, false) => {
                 self.children.set(Color::TRANSPARENT);
-                self.children
-                    .set(BorderColor(Color::from_rgb8(35, 35, 37)));
+                self.children.set(BorderColor(BORDER_COLOR));
             }
         }
     }
