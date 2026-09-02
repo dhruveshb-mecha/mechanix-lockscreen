@@ -11,6 +11,9 @@ homepage: https://github.com/mecha-org/mechanix-lockscreen.git
 license: BSD
 
 overrides:
+  rpm:
+    depends:
+      - pam_pwdfile
   deb:
     depends:
       - libpam-pwdfile
