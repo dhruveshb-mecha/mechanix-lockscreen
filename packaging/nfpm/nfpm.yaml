@@ -31,10 +31,3 @@ contents:
     dst: /usr/bin/mechanix-lockscreen-make-pin
     file_info:
       mode: 0755
-  - src: ./resources/pin.passwd.sample
-    dst: /etc/mechanix/pin.passwd
-    type: config|noreplace
-    file_info:
-      mode: 0640
-      owner: root
-      group: mecha
