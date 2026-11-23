@@ -77,6 +77,8 @@ jobs:
       MECHA_PULP_PASSWORD: ${{ secrets.MECHA_PULP_PASSWORD }}
       MECHA_PULP_API_URL: ${{ vars.MECHA_PULP_API_URL }}
       MECHA_PULP_RPM_CHANNEL: ${{ vars.MECHA_PULP_RPM_CHANNEL }}
+      # .cargo/config.toml names Ubuntu's "aarch64-linux-gnu-gcc"; on Fedora the native compiler is plain gcc.
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: gcc
 
     steps:
       - name: Install build dependencies
